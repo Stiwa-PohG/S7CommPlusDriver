@@ -679,6 +679,98 @@ namespace S7CommPlusDriver
             return GetSerializedRequestLengthForBatching(request) > maxPayloadSize;
         }
 
+        /// <summary>
+        /// Appends as many candidate items as possible to a batch request without exceeding the negotiated
+        /// single-frame payload limit, mirroring the legacy "add one item, reserialize, roll back on overflow"
+        /// behavior but without the O(n^2) cost of fully reserializing the request after every single item.
+        /// </summary>
+        /// <remarks>
+        /// The serialized request length grows monotonically with the number of appended items (each item
+        /// contributes at least one byte, and VLQ-encoded counters never shrink as items are added), so a
+        /// galloping search followed by a binary search finds the exact same maximum item count as the
+        /// original linear scan, using O(log n) full-request serializations per chunk instead of O(n).
+        /// The very first candidate item is always appended unconditionally (matching the legacy behavior of
+        /// never rejecting the first item of a chunk, even if it alone would exceed the payload limit).
+        /// </remarks>
+        /// <param name="maxCandidateCount">The maximum number of remaining candidate items available for this chunk.</param>
+        /// <param name="maxPayloadSize">The negotiated single-frame payload limit in bytes.</param>
+        /// <param name="request">The request whose serialized size is checked via <paramref name="addItemAt"/>/<paramref name="removeLastItem"/> side effects.</param>
+        /// <param name="addItemAt">Appends the candidate item at the given zero-based offset (relative to the chunk start) to <paramref name="request"/>.</param>
+        /// <param name="removeLastItem">Removes the most recently appended candidate item from <paramref name="request"/>.</param>
+        /// <returns>The number of candidate items that were appended to <paramref name="request"/> and fit within the payload limit.</returns>
+        private static int AppendItemsWithinPayloadLimit(
+            int maxCandidateCount,
+            int maxPayloadSize,
+            IS7pRequest request,
+            Action<int> addItemAt,
+            Action removeLastItem)
+        {
+            if (maxCandidateCount <= 0)
+            {
+                return 0;
+            }
+
+            // The first item of a chunk is always included unconditionally, matching the legacy behavior.
+            addItemAt(0);
+            var added = 1;
+
+            var step = 1;
+            while (added < maxCandidateCount)
+            {
+                var next = Math.Min(step, maxCandidateCount - added);
+                for (var k = 0; k < next; k++)
+                {
+                    addItemAt(added + k);
+                }
+
+                if (ExceedsSingleFramePayload(request, maxPayloadSize))
+                {
+                    for (var k = 0; k < next; k++)
+                    {
+                        removeLastItem();
+                    }
+
+                    // Binary search for the exact number of additional items (within this galloping
+                    // step) that still fit, exploiting the monotonic growth of the serialized length.
+                    int lo = 0, hi = next;
+                    while (lo < hi)
+                    {
+                        var mid = (lo + hi + 1) / 2;
+                        for (var k = 0; k < mid; k++)
+                        {
+                            addItemAt(added + k);
+                        }
+                        var fits = !ExceedsSingleFramePayload(request, maxPayloadSize);
+                        for (var k = 0; k < mid; k++)
+                        {
+                            removeLastItem();
+                        }
+
+                        if (fits)
+                        {
+                            lo = mid;
+                        }
+                        else
+                        {
+                            hi = mid - 1;
+                        }
+                    }
+
+                    for (var k = 0; k < lo; k++)
+                    {
+                        addItemAt(added + k);
+                    }
+                    added += lo;
+                    break;
+                }
+
+                added += next;
+                step *= 2;
+            }
+
+            return added;
+        }
+
         private static long GetSerializedRequestLengthForBatching(IS7pRequest request)
         {
             uint sessionId = request.SessionId;
@@ -1436,17 +1528,13 @@ namespace S7CommPlusDriver
                 var getMultiVarReq = new GetMultiVariablesRequest(ProtocolVersion.V2);
 
                 getMultiVarReq.AddressList.Clear();
-                count_perChunk = 0;
-                while (count_perChunk < maxTagsPerRequest && (chunk_startIndex + count_perChunk) < addresslist.Count)
-                {
-                    getMultiVarReq.AddressList.Add(addresslist[chunk_startIndex + count_perChunk]);
-                    if (count_perChunk > 0 && ExceedsSingleFramePayload(getMultiVarReq, maxPayloadSize))
-                    {
-                        getMultiVarReq.AddressList.RemoveAt(getMultiVarReq.AddressList.Count - 1);
-                        break;
-                    }
-                    count_perChunk++;
-                }
+                var maxCandidates = Math.Min(maxTagsPerRequest, addresslist.Count - chunk_startIndex);
+                count_perChunk = AppendItemsWithinPayloadLimit(
+                    maxCandidates,
+                    maxPayloadSize,
+                    getMultiVarReq,
+                    offset => getMultiVarReq.AddressList.Add(addresslist[chunk_startIndex + offset]),
+                    () => getMultiVarReq.AddressList.RemoveAt(getMultiVarReq.AddressList.Count - 1));
 
                 res = SendS7plusFunctionObjectAndWait(getMultiVarReq, m_ReadTimeout);
                 if (res != 0)
@@ -1557,19 +1645,21 @@ namespace S7CommPlusDriver
             out int itemCount)
         {
             var request = new SetMultiVariablesRequest(ProtocolVersion.V2);
-            itemCount = 0;
-            while (itemCount < maxItems && startIndex + itemCount < addresses.Count)
-            {
-                request.AddressListVar.Add(addresses[startIndex + itemCount]);
-                request.ValueList.Add(values[startIndex + itemCount]);
-                if (itemCount > 0 && ExceedsSingleFramePayload(request, maxPayloadSize))
+            var maxCandidates = Math.Min(maxItems, addresses.Count - startIndex);
+            itemCount = AppendItemsWithinPayloadLimit(
+                maxCandidates,
+                maxPayloadSize,
+                request,
+                offset =>
+                {
+                    request.AddressListVar.Add(addresses[startIndex + offset]);
+                    request.ValueList.Add(values[startIndex + offset]);
+                },
+                () =>
                 {
                     request.AddressListVar.RemoveAt(request.AddressListVar.Count - 1);
                     request.ValueList.RemoveAt(request.ValueList.Count - 1);
-                    break;
-                }
-                itemCount++;
-            }
+                });
 
             return request;
         }
