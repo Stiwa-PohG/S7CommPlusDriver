@@ -771,6 +771,15 @@ namespace S7CommPlusDriver
             return added;
         }
 
+        // Reused across calls to GetSerializedRequestLengthForBatching to avoid allocating a new
+        // MemoryStream (and its backing buffer) for every payload-size probe. Batching a large tag
+        // count can trigger many thousands of these probes (galloping + binary search per chunk),
+        // so pooling the buffer meaningfully reduces GC pressure. [ThreadStatic] keeps this safe
+        // without locking, since a single batching operation runs synchronously on one thread and
+        // this helper is never called reentrantly.
+        [ThreadStatic]
+        private static MemoryStream t_PayloadLengthProbeStream;
+
         private static long GetSerializedRequestLengthForBatching(IS7pRequest request)
         {
             uint sessionId = request.SessionId;
@@ -784,7 +793,17 @@ namespace S7CommPlusDriver
                 request.SequenceNumber = UInt16.MaxValue;
                 request.IntegrityId = UInt32.MaxValue;
 
-                using var stream = new MemoryStream();
+                var stream = t_PayloadLengthProbeStream;
+                if (stream == null)
+                {
+                    stream = new MemoryStream(1024);
+                    t_PayloadLengthProbeStream = stream;
+                }
+                else
+                {
+                    stream.SetLength(0);
+                }
+
                 request.Serialize(stream);
                 return stream.Length;
             }
