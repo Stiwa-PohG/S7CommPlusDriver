@@ -4,6 +4,7 @@ using S7CommPlusDriver.ClientApi;
 using S7CommPlusDriver.Internal;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1325,7 +1326,11 @@ namespace S7CommPlusDriver
             return ExecuteReadOperationAsync("ReadTags", session =>
             {
                 var requestTags = ExpandAggregateTags(tagList);
+                _options.Logger.LogInformation("ReadTagValuesInBatches start...");
+                var sw = Stopwatch.StartNew();
                 var (values, itemErrors) = ReadTagValuesInBatches(session, requestTags);
+                sw.Stop();
+                _options.Logger.LogInformation($"ReadTagValuesInBatches finished: {sw.ElapsedMilliseconds}ms");
                 var items = new List<S7CommPlusTagReadResult>(tagList.Count);
                 var requestIndex = 0;
                 foreach (var tag in tagList)
