@@ -2297,7 +2297,7 @@ namespace S7CommPlusDriver.ClientApi
                 bool dataOk = true;
                 foreach (var item in value)
                 {
-                    if (item < new DateTime(1990, 1, 1) && item >= new DateTime(2090, 1, 1))
+                    if (item < new DateTime(1990, 1, 1) || item >= new DateTime(2090, 1, 1))
                     {
                         dataOk = false;
                         break;
@@ -2336,7 +2336,7 @@ namespace S7CommPlusDriver.ClientApi
                     }
                     // The left nibble of the last byte contains the LSD of milliseconds,
                     // the right nibble the weekday (which we don't process here).
-                    ts[7] = v[7] >> 4;
+                    ts[7] = v[pos + 7] >> 4;
 
                     int year;
                     if (ts[0] >= 90)

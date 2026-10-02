@@ -10,6 +10,83 @@ namespace S7CommPlusDriver.Tests
     public sealed class ProtocolValueAndTextListTests
     {
         [Fact]
+        public void DateAndTimeArrayPreservesEachMillisecondDigitAndRejectsInvalidRange()
+        {
+            var tag = new ClientApi.PlcTagDateAndTimeArray("Test", new ItemAddress(), 0);
+            var values = new[] { new DateTime(2024, 2, 29, 12, 34, 56, 123), new DateTime(2024, 2, 29, 12, 34, 56, 789) };
+            tag.Value = values;
+            tag.ProcessReadResult(tag.GetWriteValue(), 0);
+            Assert.Equal(values, tag.Value);
+            Assert.Throws<ArgumentOutOfRangeException>(() => tag.Value = new[] { new DateTime(1989, 12, 31) });
+            Assert.Throws<ArgumentOutOfRangeException>(() => tag.Value = new[] { new DateTime(2090, 1, 1) });
+            Assert.Equal(values, tag.Value);
+        }
+        [Fact]
+        public void StreamedVariableResponseReportsItsOwnFunctionCode()
+        {
+            Assert.Equal(Functioncode.GetVarSubStreamed, new GetVarSubstreamedResponse(2).FunctionCode);
+        }
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void EmptyBlobPayloadsCanBeSerializedAfterDecoding(bool sparse)
+        {
+            var bytes = sparse
+                ? new byte[] { 0x40, Datatype.Blob, 1, 0, 0, 0 }
+                : new byte[] { 0, Datatype.Blob, 0, 0 };
+            using var input = new MemoryStream(bytes);
+            var value = PValue.Deserialize(input);
+            if (sparse) Assert.Empty(Assert.IsType<ValueBlobSparseArray>(value).GetValue()[1].value);
+            else Assert.Empty(Assert.IsType<ValueBlob>(value).GetValue());
+            using var output = new MemoryStream();
+            value.Serialize(output);
+            Assert.Equal(bytes, output.ToArray());
+            Assert.Equal(input.Length, input.Position);
+        }
+
+        [Fact]
+        public void TimeArraysUseTheirOwnDatatypeAndDefaultArrayFlags()
+        {
+            var timestamps = new ulong[] { 0, 1, ulong.MaxValue };
+            var timespans = new long[] { long.MinValue, -1, 0, 1, long.MaxValue };
+            using var stream = new MemoryStream();
+            new ValueTimestampArray(timestamps).Serialize(stream);
+            new ValueTimespanArray(timespans).Serialize(stream);
+            new ValueUDInt(42).Serialize(stream);
+            stream.Position = 0;
+            var timestampArray = Assert.IsType<ValueTimestampArray>(PValue.Deserialize(stream));
+            Assert.True(timestampArray.IsArray());
+            Assert.Equal(timestamps, timestampArray.GetValue());
+            var timespanArray = Assert.IsType<ValueTimespanArray>(PValue.Deserialize(stream));
+            Assert.True(timespanArray.IsArray());
+            Assert.Equal(timespans, timespanArray.GetValue());
+            Assert.Equal(42u, Assert.IsType<ValueUDInt>(PValue.Deserialize(stream)).GetValue());
+            Assert.Equal(stream.Length, stream.Position);
+        }
+
+        [Fact]
+        public void UnicodeWStringsUseUtf8ByteLengthsAndPreserveFollowingValues()
+        {
+            const string text = "Grüße 世界 😀";
+            PValue[] values = {
+                new ValueWString(text),
+                new ValueWStringArray(new[] { text, "" }),
+                new ValueWStringSparseArray(new Dictionary<uint, string> { { 1, text }, { 7, "" } })
+            };
+            using var stream = new MemoryStream();
+            foreach (var value in values) value.Serialize(stream);
+            new ValueUDInt(123).Serialize(stream);
+            stream.Position = 0;
+            Assert.Equal(text, Assert.IsType<ValueWString>(PValue.Deserialize(stream)).GetValue());
+            Assert.Equal(new[] { text, "" }, Assert.IsType<ValueWStringArray>(PValue.Deserialize(stream)).GetValue());
+            var sparse = Assert.IsType<ValueWStringSparseArray>(PValue.Deserialize(stream)).GetValue();
+            Assert.Equal(text, sparse[1]);
+            Assert.Equal("", sparse[7]);
+            Assert.Equal(123u, Assert.IsType<ValueUDInt>(PValue.Deserialize(stream)).GetValue());
+            Assert.Equal(stream.Length, stream.Position);
+        }
+
+        [Fact]
         public void AddressArrayOfVariantsRoundTripsCapturedWireShape()
         {
             var bytes = new byte[]

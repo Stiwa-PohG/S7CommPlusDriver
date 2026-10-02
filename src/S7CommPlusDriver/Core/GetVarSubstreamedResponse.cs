@@ -25,7 +25,7 @@ namespace S7CommPlusDriver
         public PValue Value;
 
         public byte ProtocolVersion { get; set; }
-        public ushort FunctionCode { get => Functioncode.SetVariable; }
+        public ushort FunctionCode { get => Functioncode.GetVarSubStreamed; }
         public ushort SequenceNumber { get; set; }
         public uint IntegrityId { get; set; }
         public bool WithIntegrityId { get; set; }

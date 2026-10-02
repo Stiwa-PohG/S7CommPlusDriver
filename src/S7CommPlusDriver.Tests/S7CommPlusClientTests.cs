@@ -532,6 +532,56 @@ namespace S7CommPlusDriver.Tests
         }
 
         [Fact]
+        public async Task DisconnectTimeoutReportsErrorAndCompletesCleanup()
+        {
+            var fake = new FakeS7CommPlusSession
+            {
+                DisconnectHandler = _ =>
+                {
+                    Task.Delay(250).Wait();
+                    return 0;
+                }
+            };
+            var client = CreateClient(fake);
+            await client.ConnectAsync();
+            var errors = new List<S7CommPlusException>();
+            client.CommunicationError += (_, args) => errors.Add(args.Exception);
+
+            await client.DisconnectAsync();
+
+            var error = Assert.IsType<S7CommPlusTimeoutException>(Assert.Single(errors));
+            Assert.Equal("Disconnect", error.Operation);
+            Assert.Equal(S7CommPlusConnectionState.Disconnected, client.State);
+            Assert.False(client.IsConnected);
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(S7Consts.errTCPDataReceive)]
+        public async Task ReadReconnectCleansUpOldSessionDespiteDisconnectFailure(int disconnectError)
+        {
+            var fake = new FakeS7CommPlusSession { DisconnectHandler = _ => disconnectError };
+            fake.ReadHandler = _ => fake.ReadCount == 1
+                ? (S7Consts.errTCPDataReceive, new List<object?>(), new List<ulong>())
+                : (0, new List<object?> { new ValueInt(7) }, new List<ulong> { 0 });
+            var client = CreateClient(fake);
+            await client.ConnectAsync();
+            var states = new List<S7CommPlusConnectionState>();
+            var errors = new List<S7CommPlusException>();
+            client.ConnectionStateChanged += (_, args) => states.Add(args.NewState);
+            client.CommunicationError += (_, args) => errors.Add(args.Exception);
+
+            var result = await client.ReadAsync(new[] { new ItemAddress("8A0E0001.F") });
+
+            Assert.True(result.Items[0].IsSuccess);
+            Assert.Equal(1, fake.DisconnectCount);
+            Assert.Equal(2, fake.ConnectCount);
+            Assert.Equal(disconnectError == 0 ? 1 : 2, errors.Count);
+            Assert.Equal(new[] { S7CommPlusConnectionState.Reconnecting, S7CommPlusConnectionState.Disconnecting,
+                S7CommPlusConnectionState.Disconnected, S7CommPlusConnectionState.Reconnecting, S7CommPlusConnectionState.Connected }, states);
+        }
+
+        [Fact]
         public async Task RequestTimeoutIsTypedFailure()
         {
             var fake = new FakeS7CommPlusSession
@@ -1325,6 +1375,40 @@ namespace S7CommPlusDriver.Tests
         }
 
         [Fact]
+        public async Task ActiveAlarmCatalogOverloadsFilterNullItemsAndValidateLanguages()
+        {
+            var alarm = new S7CommPlusAlarm();
+            var fake = new FakeS7CommPlusSession { ActiveAlarmsHandler = () => (0, new List<S7CommPlusAlarm> { null!, alarm, null! }) };
+            var client = CreateClient(fake);
+            var catalog = S7CommPlusTextListCatalog.Empty;
+
+            Assert.Same(alarm, Assert.Single(await client.GetActiveAlarmsAsync(catalog)));
+            Assert.Equal(0, fake.LastActiveAlarmsLanguageId);
+            Assert.Same(alarm, Assert.Single(await client.GetActiveAlarmsAsync(1031, catalog)));
+            Assert.Equal(1031, fake.LastActiveAlarmsLanguageId);
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.GetActiveAlarmsAsync(-1, catalog));
+        }
+
+        [Fact]
+        public async Task TextListApiMaterializesLanguagesAndReturnsEmptyCatalogForMissingResult()
+        {
+            var fake = new FakeS7CommPlusSession();
+            var languages = new List<int> { 1031, 1033 };
+            var captured = new List<int[]>();
+            fake.TextListsHandler = requested => { captured.Add(requested.ToArray()); return (0, null!); };
+            var client = CreateClient(fake);
+            var pending = client.GetTextListsAsync(languages);
+            languages[0] = 999;
+
+            Assert.Same(S7CommPlusTextListCatalog.Empty, await pending);
+            Assert.Equal(new[] { 1031, 1033 }, captured[0]);
+            Assert.Same(S7CommPlusTextListCatalog.Empty, await client.GetTextListsAsync());
+            Assert.Empty(captured[1]);
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.GetTextListsAsync(new[] { -1 }));
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.GetTextListsAsync(new[] { 65536 }));
+        }
+
+        [Fact]
         public void AlarmExposesSourceRelationAndAlarmIds()
         {
             var alarm = new S7CommPlusAlarm
@@ -1865,6 +1949,81 @@ namespace S7CommPlusDriver.Tests
             await Assert.ThrowsAsync<S7CommPlusConnectionException>(() => subscription.Completion);
             Assert.Equal(1, fake.AlarmSubscriptionCreateCount);
             Assert.Equal(0, fake.AlarmSubscriptionDeleteCount);
+        }
+
+        [Theory]
+        [InlineData(0, false)]
+        [InlineData(1, false)]
+        [InlineData(2, false)]
+        [InlineData(3, false)]
+        [InlineData(4, false)]
+        [InlineData(0, true)]
+        [InlineData(1, true)]
+        [InlineData(2, true)]
+        [InlineData(3, true)]
+        [InlineData(4, true)]
+        public async Task AlarmConvenienceOverloadsPreserveLanguagesCreditAndSnapshotOrder(int form, bool withSnapshot)
+        {
+            var order = new List<string>();
+            uint[]? capturedLanguages = null;
+            short capturedCredit = 0;
+            var fake = new FakeS7CommPlusSession
+            {
+                CpuCultureInfoHandler = () => (0, new S7CommPlusCpuCultureInfo(new[] { 1031, 2057, 1036, 1033 })),
+                CreateAlarmSubscriptionHandler = (languages, credit) =>
+                {
+                    order.Add("subscribe"); capturedLanguages = languages; capturedCredit = credit; return 0;
+                },
+                WaitForAlarmSubscriptionHandler = (_, _) =>
+                {
+                    Thread.Sleep(5); return (S7Consts.errCliJobTimeout, new List<Notification>());
+                }
+            };
+            var snapshotFake = new FakeS7CommPlusSession
+            {
+                ActiveAlarmsHandler = () =>
+                {
+                    order.Add("snapshot"); return (0, new List<S7CommPlusAlarm> { null! });
+                }
+            };
+            await using var client = CreateClient(fake);
+            await using var snapshotClient = CreateClient(snapshotFake);
+            var options = FastSubscriptionOptions(); options.InitialCreditLimit = 23;
+            var catalog = S7CommPlusTextListCatalog.Empty;
+            S7CommPlusAlarmSubscription subscription;
+            if (withSnapshot)
+            {
+                var result = form switch
+                {
+                    0 => await client.SubscribeAlarmsWithSnapshotAsync(snapshotClient, options),
+                    1 => await client.SubscribeAlarmsWithSnapshotAsync(snapshotClient, 1033, options),
+                    2 => await client.SubscribeAlarmsWithSnapshotAsync(snapshotClient, 1033, catalog, options),
+                    3 => await client.SubscribeAlarmsWithSnapshotAsync(snapshotClient, new[] { 1031, 1033 }, 1033, options),
+                    _ => await client.SubscribeAlarmsWithSnapshotAsync(snapshotClient, new[] { 1031, 1033 }, 1033, catalog, options)
+                };
+                subscription = result.Subscription;
+                Assert.Empty(result.ActiveAlarms);
+                Assert.Equal(form == 0 ? 1031 : 1033, snapshotFake.LastActiveAlarmsLanguageId);
+            }
+            else
+            {
+                subscription = form switch
+                {
+                    0 => await client.SubscribeAlarmsAsync(options),
+                    1 => await client.SubscribeAlarmsAsync(1033, options),
+                    2 => await client.SubscribeAlarmsAsync(1033, catalog, options),
+                    3 => await client.SubscribeAlarmsAsync(new[] { 1031, 1033 }, 1033, options),
+                    _ => await client.SubscribeAlarmsAsync(new[] { 1031, 1033 }, 1033, catalog, options)
+                };
+            }
+            await subscription.DisposeAsync();
+            var expectedLanguages = form == 0 ? new[] { 1031, 2057, 1036 } : form < 3 ? new[] { 1033 } : new[] { 1031, 1033 };
+            Assert.Equal(expectedLanguages.Select(id => (uint)id), capturedLanguages);
+            Assert.Equal(expectedLanguages, subscription.LanguageIds);
+            Assert.Equal(form == 0 ? 1031 : 1033, subscription.AlarmTextLanguageId);
+            Assert.Equal(23, capturedCredit);
+            Assert.Equal(withSnapshot ? new[] { "subscribe", "snapshot" } : new[] { "subscribe" }, order);
+            Assert.Equal(form == 0 ? 1 : 0, fake.GetCpuCultureInfoCount);
         }
 
         [Fact]

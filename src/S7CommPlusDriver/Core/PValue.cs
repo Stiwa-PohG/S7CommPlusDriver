@@ -2204,7 +2204,7 @@ namespace S7CommPlusDriver
     {
         UInt64[] Value;
 
-        public ValueTimestampArray(UInt64[] value) : this(value, 0)
+        public ValueTimestampArray(UInt64[] value) : this(value, FLAGS_ARRAY)
         {
         }
 
@@ -2383,7 +2383,7 @@ namespace S7CommPlusDriver
         {
             int ret = 0;
             ret += S7p.EncodeByte(buffer, DatatypeFlags);
-            ret += S7p.EncodeByte(buffer, Datatype.LReal);
+            ret += S7p.EncodeByte(buffer, Datatype.Timespan);
             ret += S7p.EncodeUInt32Vlq(buffer, (uint)Value.Length);
             for (int i = 0; i < Value.Length; i++)
             {
@@ -2672,6 +2672,7 @@ namespace S7CommPlusDriver
         {
             BlobRootId = blobRootId;
             DatatypeFlags = flags;
+            Value = Array.Empty<byte>();
             // A blob with size zero is allowed and no error.
             if (value != null)
             {
@@ -2914,6 +2915,7 @@ namespace S7CommPlusDriver
                     S7p.DecodeUInt32Vlq(buffer, out blobSize);
                     v.value = new byte[blobSize];
                     S7p.DecodeOctets(buffer, (int)blobSize, out v.value);
+                    v.value ??= Array.Empty<byte>();
                     value.Add(k, v);
 
                     S7p.DecodeUInt32Vlq(buffer, out k);
@@ -2928,6 +2930,7 @@ namespace S7CommPlusDriver
                     S7p.DecodeUInt32(buffer, out blobSize);
                     v.value = new byte[blobSize];
                     S7p.DecodeOctets(buffer, (int)blobSize, out v.value);
+                    v.value ??= Array.Empty<byte>();
                     value.Add(k, v);
 
                     S7p.DecodeUInt32(buffer, out k);
@@ -2960,7 +2963,7 @@ namespace S7CommPlusDriver
             int ret = 0;
             ret += S7p.EncodeByte(buffer, DatatypeFlags);
             ret += S7p.EncodeByte(buffer, Datatype.WString);
-            ret += S7p.EncodeUInt32Vlq(buffer, (uint)Value.Length);
+            ret += S7p.EncodeUInt32Vlq(buffer, (uint)System.Text.Encoding.UTF8.GetByteCount(Value));
             ret += S7p.EncodeWString(buffer, Value);
             return ret;
         }
@@ -3013,7 +3016,7 @@ namespace S7CommPlusDriver
             ret += S7p.EncodeUInt32Vlq(buffer, (uint)Value.Length);
             for (int i = 0; i < Value.Length; i++)
             {
-                ret += S7p.EncodeUInt32Vlq(buffer, (uint)Value[i].Length);
+                ret += S7p.EncodeUInt32Vlq(buffer, (uint)System.Text.Encoding.UTF8.GetByteCount(Value[i]));
                 ret += S7p.EncodeWString(buffer, Value[i]);
             }
             return ret;
@@ -3088,7 +3091,7 @@ namespace S7CommPlusDriver
             foreach (var v in Value)
             {
                 ret += S7p.EncodeUInt32Vlq(buffer, v.Key);
-                ret += S7p.EncodeUInt32Vlq(buffer, (uint)v.Value.Length);
+                ret += S7p.EncodeUInt32Vlq(buffer, (uint)System.Text.Encoding.UTF8.GetByteCount(v.Value));
                 ret += S7p.EncodeWString(buffer, v.Value);
             }
             ret += S7p.EncodeByte(buffer, 0);
