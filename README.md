@@ -747,3 +747,7 @@ Unless otherwise noted, all source code is licensed under LGPL-3.0-or-later.
 
 - Thomas Wiens - initial work - https://github.com/thomas-v2
 - DotNetProjects contributors
+
+## Apple Mobile Integration
+
+On .NET 6+ iOS, Mac Catalyst and tvOS use the native BSD socket transport, including request-timeout updates and SIGPIPE suppression. The existing managed transport remains the default elsewhere. The default managed Bouncy Castle TLS backend does not require bundled OpenSSL; choosing the OpenSSL backend still does. See [the package documentation](src/S7CommPlusDriver/README.md) for details. Device-level NativeAOT and PLC validation remains required.

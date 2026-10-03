@@ -115,8 +115,15 @@ namespace S7CommPlusDriver
 
         private static string GetUserName()
         {
-            var user = Environment.UserName;
-            return string.IsNullOrWhiteSpace(user) ? "---" : user;
+            try
+            {
+                var user = Environment.UserName;
+                return string.IsNullOrWhiteSpace(user) ? "---" : user;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                return "---";
+            }
         }
 
         public byte GetProtocolVersion()

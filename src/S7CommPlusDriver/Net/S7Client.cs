@@ -627,9 +627,20 @@ namespace S7CommPlusDriver
 		#region [Class Control]
 
 		public S7Client()
-			: this(() => new SocketS7Transport())
+			: this(CreateDefaultTransport)
 		{
 		}
+
+        private static IS7Transport CreateDefaultTransport()
+        {
+#if NET6_0_OR_GREATER
+            if (OperatingSystem.IsIOS() || OperatingSystem.IsMacCatalyst() || OperatingSystem.IsTvOS())
+            {
+                return new BsdSocketS7Transport();
+            }
+#endif
+            return new SocketS7Transport();
+        }
 
 		internal S7Client(Func<IS7Transport> transportFactory)
 		{

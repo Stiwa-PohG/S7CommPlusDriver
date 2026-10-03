@@ -14,6 +14,12 @@ The managed BouncyCastle backend is the default TLS implementation unless `S7Com
 
 Default connection parameters are exposed through `S7CommPlusDefaults`: ISO-on-TCP port `102`, local TSAP `0x0600`, HMI remote TSAP `SIMATIC-ROOT-HMI`, and engineering remote TSAP `SIMATIC-ROOT-ES`. `S7CommPlusClientOptions.SessionRole` defaults to `S7CommPlusSessionRole.Hmi` for both TLS and legacy challenge connections. Set it to `S7CommPlusSessionRole.EngineeringSystem` only when an engineering-class session is required; such a session can prevent TIA Portal from downloading hardware configuration while the driver remains connected. An explicitly assigned `RemoteTsap` overrides the standard TSAP selected by the role.
 
+## Apple Mobile Transport
+
+On .NET 6+ the default transport uses native BSD sockets on iOS, Mac Catalyst and tvOS. Other platforms retain the managed socket transport. The Apple transport supports the same request-phase timeout updates as the managed transport and suppresses SIGPIPE on disconnected sockets. The default managed Bouncy Castle TLS backend avoids bundling OpenSSL for these connections; explicitly selecting the OpenSSL backend still requires its native libraries.
+
+Legacy session setup falls back to an anonymous user label on platforms where `Environment.UserName` is unsupported. NativeAOT packaging and PLC handshakes must still be validated on a real device.
+
 ## Older PLCs / Legacy Challenge Auth
 
 Siemens OMS names the old non-TLS mode `SecurityTypeCSI`. This library exposes it as `S7CommPlusSecurityMode.LegacyChallenge`. Because `Auto` is the `net48`/`net8.0`/`net9.0` default, applications that must prohibit fallback should explicitly use `S7CommPlusSecurityMode.Tls`.
