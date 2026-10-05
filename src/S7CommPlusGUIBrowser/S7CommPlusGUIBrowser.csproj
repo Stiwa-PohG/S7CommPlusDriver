@@ -7,6 +7,8 @@
     <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <GenerateResourceWarnOnBinaryFormatterUse>false</GenerateResourceWarnOnBinaryFormatterUse>
+    <SignAssembly>True</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\S7CommPlusDriver.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <PropertyGroup>
     <NoWarn>1701;1702;CA1416</NoWarn>

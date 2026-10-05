@@ -44,13 +44,11 @@
     <Folder Include="runtimes\linux-x64\" />
     <Folder Include="runtimes\osx-x64\" />
   </ItemGroup>
-  <ItemGroup Condition="'$(TargetFramework)' == 'net48' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0'">
-    <PackageReference Include="HarpoS7">
-      <Version>1.1.4</Version>
-    </PackageReference>
-    <PackageReference Include="HarpoS7.PublicKeys">
-      <Version>1.1.4</Version>
-    </PackageReference>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\HarpoS7\HarpoS7.Family0\HarpoS7.Family0.csproj" />
+    <ProjectReference Include="..\..\..\HarpoS7\HarpoS7.PublicKeys\HarpoS7.PublicKeys.csproj" />
+    <ProjectReference Include="..\..\..\HarpoS7\HarpoS7.Utilities\HarpoS7.Utilities.csproj" />
+    <ProjectReference Include="..\..\..\HarpoS7\HarpoS7\HarpoS7.csproj" />
   </ItemGroup>
   <PropertyGroup>
     <AssemblyTitle>S7CommPlusDriver</AssemblyTitle>
@@ -65,5 +63,7 @@
     <PackageProjectUrl>https://github.com/dotnetprojects/S7CommPlusDriver</PackageProjectUrl>
     <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <SignAssembly>True</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\S7CommPlusDriver.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 </Project>
