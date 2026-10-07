@@ -343,20 +343,24 @@ namespace OpenSsl
             }
         }
 
-        public void Write(byte[] pData,int dataLen)
+        private readonly object m_sslGate = new object();
+        
+        public void Write(byte[] pData, int dataLen)
         {
-            DataBuffer pBuffer = new DataBuffer(pData, dataLen);
-            AppendBuffer(m_pendingWriteList, pBuffer);
-
-            RunSSL();
+           lock (m_sslGate)
+           {
+               AppendBuffer(m_pendingWriteList, new DataBuffer(pData, dataLen));
+               RunSSL();
+           }
         }
-
+        
         public void ReadCompleted(byte[] pData, int dataLen)
         {
-            DataBuffer pBuffer = new DataBuffer(pData, dataLen);
-            AppendBuffer(m_pendingReadList, pBuffer);
-
-            RunSSL();
+           lock (m_sslGate)
+           {
+               AppendBuffer(m_pendingReadList, new DataBuffer(pData, dataLen));
+               RunSSL();
+           }
         }
 
         private void GetPendingOperations(ref bool dataToRead, ref bool dataToWrite)
