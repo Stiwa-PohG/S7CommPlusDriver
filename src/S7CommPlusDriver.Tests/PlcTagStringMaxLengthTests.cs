@@ -1,4 +1,5 @@
 using S7CommPlusDriver.ClientApi;
+using System.IO;
 using Xunit;
 
 namespace S7CommPlusDriver.Tests
@@ -81,6 +82,15 @@ namespace S7CommPlusDriver.Tests
 
             var wstringTag = Assert.IsType<PlcTagWString>(tag);
             Assert.Equal(20, wstringTag.GetMaxStringLength());
+        }
+
+        [Fact]
+        public void MultiDimensionalStringArrayOffsetInfoReportsDeclaredMaxStringLength()
+        {
+            // UnspecifiedOffsetinfo1 carries one string length that applies to every dimension,
+            // so the multidimensional offset info must expose it just like the 1-dim variant.
+            var offsetInfo = new POffsetInfoType_ArrayMDim { UnspecifiedOffsetinfo1 = 5 };
+            Assert.Equal(5, offsetInfo.MaxStringLength());
         }
 
         private static PValue GetWriteValue(PlcTag tag)

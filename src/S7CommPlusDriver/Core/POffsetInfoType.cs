@@ -461,6 +461,8 @@ namespace S7CommPlusDriver
         public override bool HasRelation() { return false; }
         public override bool Is1Dim() { return false; }
         public override bool IsMDim() { return true; }
+        // For a string array, UnspecifiedOffsetinfo1 carries the maximum string length of the array elements.
+        public override int MaxStringLength() { return UnspecifiedOffsetinfo1; }
 
         public static POffsetInfoType_ArrayMDim Deserialize(Stream buffer, out int length)
         {
